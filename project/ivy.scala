@@ -1,18 +1,24 @@
 import sbt._
 
 
+case class License(name: String, url: String) {
+  override def toString = name + " @ " + url
+}
+
 object IvyHelper {
+  
+
   
   /** Resolves a set of modules from an SBT configured ivy and pushes them into
    * the given repository (by name).
    * 
-   * Intended usage, requires the named resovle to exist, and be on that accepts installed artifacts (i.e. file://)
+   * Intended usage, requires the named resolve to exist, and be on that accepts installed artifacts (i.e. file://)
    */
   def createLocalRepository(
       modules: Seq[ModuleID],
       localRepoName: String,
       ivy: IvySbt, 
-      log: Logger): Unit = ivy.withIvy(log) { ivy =>
+      log: Logger): Seq[License] = ivy.withIvy(log) { ivy =>
 
     import org.apache.ivy.core.module.id.ModuleRevisionId
     import org.apache.ivy.core.report.ResolveReport
@@ -43,6 +49,17 @@ object IvyHelper {
        }
     }
     // Grab all Artifacts
-    modules foreach installModule     
+    val reports = modules flatMap installModule
+    import org.apache.ivy.core.resolve.IvyNode
+    import collection.JavaConverters._
+    val licenses = for {
+      report <- reports
+      dep <- report.getDependencies.asInstanceOf[java.util.List[IvyNode]].asScala
+      if dep != null
+      license <- Option(dep.getDescriptor) map (_.getLicenses) getOrElse Array.empty
+    } yield License(license.getName, license.getUrl)
+    
+    // TODO - Create reverse lookup table for licenses by artifact...
+    licenses.distinct
   }
 }
