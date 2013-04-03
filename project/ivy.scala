@@ -1,7 +1,7 @@
 import sbt._
 
 
-case class License(name: String, url: String) {
+case class License(name: String, url: String)(val deps: Seq[String]) {
   override def toString = name + " @ " + url
 }
 
@@ -52,14 +52,21 @@ object IvyHelper {
     val reports = modules flatMap installModule
     import org.apache.ivy.core.resolve.IvyNode
     import collection.JavaConverters._
+    
     val licenses = for {
       report <- reports
       dep <- report.getDependencies.asInstanceOf[java.util.List[IvyNode]].asScala
       if dep != null
-      license <- Option(dep.getDescriptor) map (_.getLicenses) getOrElse Array.empty
-    } yield License(license.getName, license.getUrl)
+      desc <- Option(dep.getDescriptor).toSeq
+      license <- Option(desc.getLicenses) getOrElse Array.empty
+    } yield License(license.getName, license.getUrl)(dep.getAllArtifacts.map(_.getName))
     
-    // TODO - Create reverse lookup table for licenses by artifact...
-    licenses.distinct
+    // Create reverse lookup table for licenses by artifact...
+    val grouped = for {
+      (name, licenses) <- licenses.groupBy(_.name)
+      l <- licenses.headOption.toSeq
+    } yield License(l.name, l.url)(licenses flatMap (_.deps) distinct)
+    
+    grouped.toIndexedSeq
   }
 }
