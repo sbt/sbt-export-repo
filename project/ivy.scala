@@ -9,11 +9,7 @@ import org.apache.ivy.core.resolve.IvyNode
 import collection.JavaConverters._
 import java.io.BufferedWriter
 import org.apache.ivy.core.module.id.ModuleId
-
-
-case class License(name: String, url: String)(val deps: Seq[String]) {
-  override def toString = name + " @ " + url
-}
+import com.typesafe.sbt.license._
 
 object IvyHelper {
   
@@ -60,18 +56,11 @@ object IvyHelper {
     
     val licenses = for {
       report <- reports
-      dep <- report.getDependencies.asInstanceOf[java.util.List[IvyNode]].asScala
-      if dep != null
-      desc <- Option(dep.getDescriptor).toSeq
-      license <- Option(desc.getLicenses) getOrElse Array.empty
-    } yield License(license.getName, license.getUrl)(dep.getAllArtifacts.map(_.getName))
+      license <- LicenseReport.getLicenses(report, configs = Seq.empty)
+    } yield license
     
     // Create reverse lookup table for licenses by artifact...
-    val grouped = for {
-      (name, licenses) <- licenses.groupBy(_.name)
-      l <- licenses.headOption.toSeq
-    } yield License(l.name, l.url)(licenses flatMap (_.deps) distinct)
-    
+    val grouped = LicenseReport.groupLicenses(licenses)
     grouped.toIndexedSeq
   }
   
