@@ -23,7 +23,8 @@ object IvyHelper {
   def createLocalRepository(
       modules: Seq[ModuleID],
       localRepoName: String,
-      ivy: IvySbt, 
+      ivy: IvySbt,
+      targetDir: File,
       log: Logger): Seq[License] = ivy.withIvy(log) { ivy =>
 
 
@@ -52,7 +53,7 @@ object IvyHelper {
     // Grab all Artifacts
     val reports = (modules flatMap installModule).toSeq
     
-    dumpDepGraph(reports)
+    dumpDepGraph(targetDir, reports)
     
     val licenses = for {
       report <- reports
@@ -77,7 +78,7 @@ object IvyHelper {
   }
   
     // TODO - Clean this up and put it somewhere useful.
-  def dumpDepGraph(reports: Seq[ResolveReport]): Unit = withPrintableFile(new File("target/local-repo-deps.txt")) { println =>
+  def dumpDepGraph(targetDir: File, reports: Seq[ResolveReport]): Unit = withPrintableFile(new File(targetDir, "local-repo-deps.txt")) { println =>
     // Here we make an assumption...
     // THE FIRST MODULE is the one that we wanted, the rest are
     // the ones we pulled in...
@@ -86,15 +87,32 @@ object IvyHelper {
       val requested = modules.head
       val name = requested.getOrganisation + ":" + requested.getName
       println(name + " - requested")
+
+      val messages = report.getAllProblemMessages().asInstanceOf[java.util.List[String]].asScala
+
+      for (msg <- messages) {
+        println("\t PROBLEM: " + msg)
+      }
+
+      val evicted = Option(report.getEvictedNodes()).map(_.toSeq).getOrElse(Nil)
+      for (e <- evicted) {
+        println("\t EVICTED: " + e)
+      }
+
+      val artifacts = Option(report.getAllArtifactsReports()).map(_.toSeq).getOrElse(Nil)
+      for (a <- artifacts) {
+        println("\t ARTIFACT: " + a)
+      }
+
       // Now find what we got:
       val deps = for {
 	    dep <- report.getDependencies.asInstanceOf[java.util.List[IvyNode]].asScala
 	    if dep != null
 	    depId = dep.getId
-	    if !((depId.getOrganisation == requested.getOrganisation) && (depId.getName == requested.getName))
+	    //if !((depId.getOrganisation == requested.getOrganisation) && (depId.getName == requested.getName))
 	  } yield depId.getOrganisation + ":" + depId.getName + ":" + depId.getRevision
 	  
-	  deps foreach { dep => println("\t " + dep) }
+	  deps foreach { dep => println("\t DEPENDENCY: " + dep) }
     }
   }
   
