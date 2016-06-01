@@ -1,72 +1,132 @@
+package sbtexportrepo
+
 import sbt._
 import org.apache.ivy.core.resolve.IvyNode
 import org.apache.ivy.core.module.id.ModuleRevisionId
 import org.apache.ivy.core.report.ResolveReport
 import org.apache.ivy.core.install.InstallOptions
 import org.apache.ivy.plugins.matcher.PatternMatcher
+import org.apache.ivy.plugins.resolver.RepositoryResolver
 import org.apache.ivy.util.filter.FilterHelper
 import org.apache.ivy.core.resolve.IvyNode
 import collection.JavaConverters._
 import java.io.BufferedWriter
 import org.apache.ivy.core.module.id.ModuleId
-import com.typesafe.sbt.license._
+import cross.CrossVersionUtil
+import scala.util.control.NonFatal
 
-object IvyHelper {
-  
-
-  
+object ExportRepo {
   /** Resolves a set of modules from an SBT configured ivy and pushes them into
    * the given repository (by name).
-   * 
+   *
    * Intended usage, requires the named resolve to exist, and be on that accepts installed artifacts (i.e. file://)
    */
-  def createLocalRepository(
-      modules: Seq[ModuleID],
+  def install(
+      projDeps: Seq[ModuleID],
+      libraryDeps: Seq[ModuleID],
+      scalaFullVersion: Option[String],
+      configurations: Seq[Configuration],
       localRepoName: String,
-      ivy: IvySbt,
-      targetDir: File,
-      log: Logger): Seq[License] = ivy.withIvy(log) { ivy =>
+      tempDirecotry: File,
+      outDirectory: File,
+      reportOutputDir: File,
+      deleteExisting: Boolean,
+      ivySbt: IvySbt,
+      log: Logger): File =
+    {
+      import sbt.sbtexportrepo._
+      def isInterProject(m: ModuleID): Boolean =
+        (projDeps find { x: ModuleID =>
+          m.organization == x.organization &&
+          m.name.startsWith(x.name)
+        }).isDefined
+      val modules0 = projDeps ++ libraryDeps
+      val fm = fakeModule(modules0, scalaFullVersion, configurations, ivySbt)
+      val modules = fm.moduleSettings match {
+        case i: InlineConfiguration => i.dependencies
+        case x                      => sys.error(s"Unexpected configuration $x")
+      }
+      val uc = new UpdateConfiguration(None, false, UpdateLogging.DownloadOnly)
+      val ur = IvyActions.update(fm, uc, log)
+      fm.withModule(log) { case (ivy, md, default) =>
+        // This helper method installs a particular module and transitive dependencies.
+        def installModule(module: ModuleID): Option[ResolveReport] = {
+          // TODO - Use SBT's default ModuleID -> ModuleRevisionId
+          val mrid = IvySbtCheater toID module
+          val resolver =
+            if (isInterProject(module)) "local"
+            else ivy.getResolveEngine.getSettings.getResolverName(mrid)
+          log.debug("Module: " + mrid + " should use resolver: " + resolver)
+          try
+          Some(ivy.install(mrid, resolver, localRepoName,
+                    new InstallOptions()
+                        .setTransitive(true)
+                        .setValidate(true)
+                        .setOverwrite(true)
+                        .setMatcherName(PatternMatcher.EXACT)
+                        .setArtifactFilter(FilterHelper.NO_FILTER)
+                    ))
+           catch {
+             case NonFatal(e) =>
+               log.warn(s"Failed to install module $module (resolver: $resolver)")
+               log.trace(e)
+               None
+           }
+        }
+        // Grab all Artifacts
+        val reports = (modules flatMap installModule).toVector
+        dumpDepGraph(reportOutputDir, reports)
+      }
+      if (outDirectory.exists && deleteExisting) {
+        IO.delete(outDirectory)
+      }
+      (outDirectory.exists, deleteExisting, tempDirecotry.exists) match {
+        case (_, _, false) => ()
+        case (true, true, _) =>
+          IO.delete(outDirectory)
+          IO.move(tempDirecotry, outDirectory)
+          // tempDirectory should now be gone
+        case (true, false, _) =>
+          IO.copyDirectory(tempDirecotry, outDirectory, true, true)
+          IO.delete(tempDirecotry)
+        case (false, _, _) =>
+          IO.move(tempDirecotry, outDirectory)
+      }
 
+      // val licenses = for {
+      //   report <- reports
+      //   license <- LicenseReport.getLicenses(report, configs = Seq.empty)
+      // } yield license
 
+      // ridiculousHacks(new File(targetDir, "local-repository"), log)
 
-    // This helper method installs a particular module and transitive dependencies.
-    def installModule(module: ModuleID): Option[ResolveReport] = {
-      // TODO - Use SBT's default ModuleID -> ModuleRevisionId
-      val mrid = IvySbtCheater toID module
-      val name = ivy.getResolveEngine.getSettings.getResolverName(mrid)
-      log.debug("Module: " + mrid + " should use resolver: " + name)
-      try Some(ivy.install(mrid, name, localRepoName,
-                new InstallOptions()
-                    .setTransitive(true)
-                    .setValidate(true)
-                    .setOverwrite(true)
-                    .setMatcherName(PatternMatcher.EXACT)
-                    .setArtifactFilter(FilterHelper.NO_FILTER)
-                ))
-       catch {
-         case e: Exception =>
-           log.debug("Failed to resolve module: " + module)
-           log.trace(e)
-           None
-       }
+      // Create reverse lookup table for licenses by artifact...
+      // val grouped = LicenseReport.groupLicenses(licenses)
+      // grouped.toIndexedSeq
+      outDirectory
     }
-    // Grab all Artifacts
-    val reports = (modules flatMap installModule).toSeq
-    
-    dumpDepGraph(targetDir, reports)
-    
-    val licenses = for {
-      report <- reports
-      license <- LicenseReport.getLicenses(report, configs = Seq.empty)
-    } yield license
 
-    ridiculousHacks(new File(targetDir, "local-repository"), log)
-
-    // Create reverse lookup table for licenses by artifact...
-    val grouped = LicenseReport.groupLicenses(licenses)
-    grouped.toIndexedSeq
+  private def fakeModule(deps: Seq[ModuleID], scalaFullVersion: Option[String],
+    configurations: Seq[Configuration], ivySbt: IvySbt): IvySbt#Module = {
+    val ivyScala = scalaFullVersion map { fv =>
+      new IvyScala(
+        scalaFullVersion = fv,
+        scalaBinaryVersion = CrossVersionUtil.binaryScalaVersion(fv),
+        configurations = Nil,
+        checkExplicit = true,
+        filterImplicit = false,
+        overrideScalaVersion = false)
+    }
+    val moduleSetting: ModuleSettings = InlineConfiguration(
+      module = ModuleID("com.example.temp", "fake", "0.1.0-SNAPSHOT"),
+      moduleInfo = ModuleInfo(""),
+      dependencies = deps,
+      configurations = configurations,
+      defaultConfiguration = Some(Compile),
+      ivyScala = ivyScala)
+    new ivySbt.Module(moduleSetting)
   }
-  
+
   def withPrintableFile(file: File)(f: (Any => Unit) => Unit): Unit = {
     IO.createDirectory(file.getParentFile)
     Using.fileWriter(java.nio.charset.Charset.defaultCharset, false)(file) { writer =>
@@ -78,7 +138,6 @@ object IvyHelper {
       f(println _)
     }
   }
-  
     // TODO - Clean this up and put it somewhere useful.
   def dumpDepGraph(targetDir: File, reports: Seq[ResolveReport]): Unit = withPrintableFile(new File(targetDir, "local-repo-deps.txt")) { println =>
     // Here we make an assumption...
@@ -113,7 +172,7 @@ object IvyHelper {
 	    depId = dep.getId
 	    //if !((depId.getOrganisation == requested.getOrganisation) && (depId.getName == requested.getName))
 	  } yield depId.getOrganisation + ":" + depId.getName + ":" + depId.getRevision
-	  
+
 	  deps foreach { dep => println("\t DEPENDENCY: " + dep) }
     }
   }

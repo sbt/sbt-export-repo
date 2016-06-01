@@ -1,0 +1,6 @@
+> publishLocal
+> dist/exportRepo
+
+$ exists dist/target/preloaded-local/com.example.exportrepo/hello_2.11/0.1.0/jars/hello_2.11.jar
+
+$ exists dist/target/preloaded-local/org.typelevel/cats_2.11/0.6.0/jars/cats_2.11.jar
