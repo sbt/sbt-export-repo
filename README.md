@@ -17,6 +17,19 @@ addSbtPlugin("com.eed3si9n" % "sbt-export-repo" % "0.1.0")
 Then, create `dist` subproject in `build.sbt`:
 
 ```scala
+lazy val root = (project in file(".")).
+  aggregate(app, dist).
+  settings(
+    inThisBuild(List(
+      scalaVersion := "2.11.8",
+      organization := "com.example",
+      version := "0.1.0-SNAPSHOT"
+    )),
+    name := "something root",
+    publish := (),
+    publishLocal := ()
+  )
+
 // Your normal subproject
 lazy val app = (project in file("app"))
 
@@ -25,7 +38,6 @@ lazy val dist = (project in file("dist")).
   enablePlugins(ExportRepoPlugin).
   dependsOn(app). // add your subprojects to export
   settings(
-    commonSettings,
     name := "dist",
     // add external libraries too. why not?
     libraryDependencies += "org.typelevel" %% "cats" % "0.6.0",

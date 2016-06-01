@@ -1,0 +1,8 @@
+This is the initial release of sbt-export-repo.
+
+### Usage
+
+    > publishLocal
+    > dist/exportRepo
+
+This will create an Ivy repo image under `dist/target/preloaded-local` containing the transitive dependencies of both the internal and external dependencies you added to `dist` (e.g. `app` and Cats). See [README](https://github.com/sbt/sbt-export-repo) for more details.
