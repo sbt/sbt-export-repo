@@ -77,6 +77,7 @@ object ExportRepo {
         val reports = (modules flatMap installModule).toVector
         dumpDepGraph(reportOutputDir, reports)
       }
+      fixupDanglingIvyFiles(tempDirecotry)
       if (outDirectory.exists && deleteExisting) {
         IO.delete(outDirectory)
       }
@@ -175,6 +176,14 @@ object ExportRepo {
 
 	  deps foreach { dep => println("\t DEPENDENCY: " + dep) }
     }
+  }
+
+  def fixupDanglingIvyFiles(dir: File): Unit = {
+    val allDirs = dir.**(DirectoryFilter).get
+    val badDirs = allDirs collect {
+      case dir if (dir / "ivys").exists && !(dir / "jars").exists => dir
+    }
+    badDirs foreach { IO.delete(_) }
   }
 
   def ridiculousHacks(dir: File, log: Logger): Unit = {
