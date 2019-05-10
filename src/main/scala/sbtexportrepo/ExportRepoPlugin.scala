@@ -17,6 +17,7 @@ object ExportRepoPlugin extends AutoPlugin {
   override def projectSettings: Seq[Def.Setting[_]] =
     Seq(
       exportRepo := {
+        val st = streams.value
         val projDeps = (projectDependencies in exportRepo).value
         val libraryDeps = (libraryDependencies in exportRepo).value
         val tmp = exportRepoActualDirectory.value
@@ -28,7 +29,7 @@ object ExportRepoPlugin extends AutoPlugin {
         ExportRepo.install(projDeps, libraryDeps,
           Some(scalaVersion.value), ivyConfigurations.value,
           repoName, tmp, out, target.value, del,
-          (ivySbt in exportRepo).value, sLog.value)
+          (ivySbt in exportRepo).value, st.log)
         out
       },
       exportRepoDirectory := { target.value / exportRepoName.value },

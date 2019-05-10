@@ -10,7 +10,7 @@ cache:
     - $HOME/.sbt/boot/scala-$TRAVIS_SCALA_VERSION
 
 jdk:
-  - openjdk7
+  - openjdk8
 
 script:
   - sbt -Dfile.encoding=UTF8 -J-XX:ReservedCodeCacheSize=256M "scripted"
